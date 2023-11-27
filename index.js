@@ -3,7 +3,7 @@ const app = express();
 const cors = require('cors');
 require('dotenv').config()
 const jwt = require('jsonwebtoken');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.hiprwon.mongodb.net/?retryWrites=true&w=majority`;
 const port = process.env.PORT || 5000;
 
@@ -124,6 +124,12 @@ async function run() {
       res.send(result);
     })
 
+    // Announcement related API
+    app.get('/announcements', async (req, res)=> {
+        const result = await announcementsCollection.find().toArray();
+        res.send(result); 
+      });
+
     // posts related APIs
     app.get('/posts', async (req, res) => {
       let sortOption = req.query.sortOption || 'latest'; // Default sort option is 'latest'
@@ -165,17 +171,14 @@ async function run() {
       }
     });
 
-
-
-
-    app.get('/posts/:id', async (req, res) => {
+    app.get('/detailedPost/:id', async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await postCollection.findOne(query);
       res.send(result);
     });
 
-    app.post('/posts', verifyToken, verifyAdmin, async (req, res) => {
+    app.post('/posts', verifyToken, async (req, res) => {
       const item = req.body;
       const result = await postCollection.insertOne(item);
       res.send(result);
