@@ -1,7 +1,8 @@
 const express = require('express');
 const app = express();
 const cors = require('cors');
-require('dotenv').config()
+require('dotenv').config();
+const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.hiprwon.mongodb.net/?retryWrites=true&w=majority`;
@@ -125,27 +126,25 @@ async function run() {
     })
 
     // Announcement related API
-    app.get('/announcements', async (req, res)=> {
-        const result = await announcementsCollection.find().toArray();
-        res.send(result); 
-      });
+    app.get('/announcements', async (req, res) => {
+      const result = await announcementsCollection.find().toArray();
+      res.send(result);
+    });
 
     // posts related APIs
     app.get('/posts', async (req, res) => {
-      let sortOption = req.query.sortOption || 'latest'; // Default sort option is 'latest'
-      let searchTerm = req.query.searchTerm || ''; // Default search term is an empty string
+      let sortOption = req.query.sortOption || 'latest';
+      let searchTerm = req.query.searchTerm || '';
 
       let sortQuery;
       if (sortOption === 'latest') {
-        sortQuery = { time: -1 }; // Sort by latest
+        sortQuery = { time: -1 };
       } else if (sortOption === 'popularity') {
-        sortQuery = { voteDifference: -1 }; // Sort by popularity
+        sortQuery = { voteDifference: -1 };
       } else {
-        // Handle other sort options if needed
-        sortQuery = { time: -1 }; // Default to sort by time
+        sortQuery = { time: -1 };
       }
 
-      // Build the aggregation pipeline
       const pipeline = [
         {
           $addFields: {
@@ -154,7 +153,29 @@ async function run() {
         },
         {
           $match: {
-            tags: { $regex: searchTerm, $options: 'i' }, // Case-insensitive regex match for tags
+            tags: { $regex: searchTerm, $options: 'i' },
+          },
+        },
+        {
+          $lookup: {
+            from: 'commentsCollection',
+            let: { postTitle: '$title' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $eq: ['$postTitle', '$$postTitle'] },
+                },
+              },
+              {
+                $count: 'commentsCount',
+              },
+            ],
+            as: 'comments',
+          },
+        },
+        {
+          $addFields: {
+            commentsCount: { $ifNull: [{ $arrayElemAt: ['$comments.commentsCount', 0] }, 0] },
           },
         },
         {
@@ -184,22 +205,53 @@ async function run() {
       res.send(result);
     })
 
-    app.patch('/posts/:id', verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const item = req.body;
-      const query = { _id: new ObjectId(id) };
+    app.patch('/posts/:id', async (req, res) => {
+      const postId = req.params.id;
+      const { upVote, downVote, commentsCount } = req.body;
+      const query = { _id: new ObjectId(postId) }
       const updateDoc = {
         $set: {
-          name: item.name,
-          category: item.category,
-          price: item.price,
-          recipe: item.recipe,
-          image: item.image
+          upVote: upVote,
+          downVote: downVote,
+          commentsCount: commentsCount,
         }
       }
       const result = await postCollection.updateOne(query, updateDoc);
+      console.log(upVote, downVote, commentsCount);
       res.send(result);
     })
+
+    // Comments section
+    app.post('/comments', async (req, res) => {
+      try {
+        const { userEmail, postTitle, comment } = req.body;
+
+        // Insert the new comment into the 'comments' collection
+        const result = await commentsCollection.insertOne({
+          userEmail,
+          postTitle,
+          comment,
+        });
+
+        // Return the inserted comment
+        res.send(result);
+      } catch (error) {
+        console.error('Error creating comment:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    });
+
+    app.get('/comments/:postTitle', async (req, res) => {
+      const postTitle = req.params.postTitle;
+
+      try {
+        const comments = await commentsCollection.find({ postTitle }).toArray();
+        res.json(comments);
+      } catch (error) {
+        console.error('Error fetching comments:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    });
 
     // payment intent
     app.post('/create-payment-intent', async (req, res) => {
