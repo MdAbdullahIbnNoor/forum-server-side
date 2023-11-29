@@ -5,6 +5,7 @@ require('dotenv').config();
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require("stripe")(`${process.env.STRIPE_SECRET_KEY}`);
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.hiprwon.mongodb.net/?retryWrites=true&w=majority`;
 const port = process.env.PORT || 5000;
 
@@ -58,7 +59,6 @@ async function run() {
         req.decoded = decoded;
         next();
       })
-      // next();
     }
 
     // use verify admin after verifyToken
@@ -103,6 +103,33 @@ async function run() {
         return res.send({ message: 'user already exists', insertedId: null })
       }
       const result = await userCollection.insertOne(user);
+      res.send(result);
+    })
+
+    // check if the user is member
+    app.get('/users/member/:email', verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email }
+      const user = await userCollection.findOne(query);
+      let badge = 'None';
+      if (user) {
+        badge = user?.badge || 'None';
+      }
+      res.send({ badge });
+    });
+
+    app.patch('/users/member/:email', async (req, res) => {
+
+      const userEmail = req.params.email;
+      const query = { email: userEmail };
+      // Now, update the user's badge to "Gold"
+      const updatedDoc = {
+        $set: {
+          badge: 'Gold'
+        }
+      }
+      const result = await userCollection.updateOne(query, updatedDoc);
+      // Send the updated user information in the response
       res.send(result);
     })
 
@@ -157,28 +184,6 @@ async function run() {
           },
         },
         {
-          $lookup: {
-            from: 'commentsCollection',
-            let: { postTitle: '$title' },
-            pipeline: [
-              {
-                $match: {
-                  $expr: { $eq: ['$postTitle', '$$postTitle'] },
-                },
-              },
-              {
-                $count: 'commentsCount',
-              },
-            ],
-            as: 'comments',
-          },
-        },
-        {
-          $addFields: {
-            commentsCount: { $ifNull: [{ $arrayElemAt: ['$comments.commentsCount', 0] }, 0] },
-          },
-        },
-        {
           $sort: sortQuery,
         },
       ];
@@ -207,19 +212,50 @@ async function run() {
 
     app.patch('/posts/:id', async (req, res) => {
       const postId = req.params.id;
-      const { upVote, downVote, commentsCount } = req.body;
+      const { upVote, downVote } = req.body;
       const query = { _id: new ObjectId(postId) }
       const updateDoc = {
         $set: {
           upVote: upVote,
           downVote: downVote,
-          commentsCount: commentsCount,
         }
+        // $increment
       }
       const result = await postCollection.updateOne(query, updateDoc);
-      console.log(upVote, downVote, commentsCount);
+      console.log(upVote, downVote);
       res.send(result);
     })
+
+    app.patch('/posts/comment-increment/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $inc: { commentsCount: 1 }, // Increment 'commentsCount' by 1
+        };
+
+        const result = await postCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error updating count:', error);
+        res.status(500).send('Internal Server Error');
+      }
+    });
+
+
+    app.get('/users/:email/posts', async (req, res) => {
+      const userEmail = req.params.email;
+
+      const posts = await postCollection
+        .find({ 'author.email': userEmail })
+        .sort({ time: -1 })
+        .limit(3)
+        .toArray();
+
+      res.send(posts);
+    });
+
+
 
     // Comments section
     app.post('/comments', async (req, res) => {
@@ -257,7 +293,7 @@ async function run() {
     app.post('/create-payment-intent', async (req, res) => {
       try {
         const { price } = req.body;
-        const amount = parseInt(price * 100); // Convert price to cents
+        const amount = 1000; // $10 in cents
 
         if (isNaN(amount) || amount < 1) {
           throw new Error('Invalid amount');
@@ -276,8 +312,16 @@ async function run() {
         console.error('Error creating payment intent:', error);
         res.status(400).send({ error: 'Invalid amount' });
       }
+    });
 
-    })
+    app.post('/payments', async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment);
+
+      // Handle the success scenario here
+
+      res.send({ paymentResult });
+    });
 
     app.get('/payments/:email', verifyToken, async (req, res) => {
       const query = { email: req.params.email }
