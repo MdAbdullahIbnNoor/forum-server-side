@@ -431,6 +431,23 @@ async function run() {
       res.send(result);
     })
 
+    // Endpoint to handle report submissions
+    app.post('/reports', async (req, res) => {
+      try {
+          const reportData = req.body;
+
+          // Insert the report data into the 'reportCollection'
+          const result = await reportCollection.insertOne(reportData);
+
+          // Send the result back to the client
+          res.json({ success: true, insertedId: result.insertedId });
+      } catch (error) {
+          console.error('Error handling report:', error);
+          res.status(500).json({ success: false, error: 'Internal Server Error' });
+      }
+  });
+
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
