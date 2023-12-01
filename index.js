@@ -10,7 +10,6 @@ const stripe = require("stripe")(`${process.env.STRIPE_SECRET_KEY}`);
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.hiprwon.mongodb.net/?retryWrites=true&w=majority`;
 const port = process.env.PORT || 5000;
 
-const operation = retry.operation();
 
 //middleware
 app.use(cors());
@@ -28,24 +27,7 @@ const client = new MongoClient(uri, {
   }
 });
 
-operation.attempt(async (currentAttempt) => {
-  try {
-    await client.connect();
-  } catch (error) {
-    console.error(`Connection attempt ${currentAttempt} failed. Retrying...`);
 
-    // Check if it's a transient error (e.g., network issue)
-    if (currentAttempt < 5) {
-      // Retry after a short delay (adjust the delay as needed)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return;
-    }
-
-    // If it's not a transient error or exceeded retry attempts, handle the error
-    console.error('Error connecting to MongoDB:', error);
-    process.exit(1); // You might want to handle this differently based on your application's needs
-  }
-});
 
 async function run() {
   try {
@@ -556,8 +538,8 @@ async function run() {
 
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
     //   await client.close();
@@ -571,17 +553,4 @@ app.get('/', (req, res) => {
 
 app.listen(port, () => {
   console.log(`Bistro boss is sitting on port ${port}`);
-});
-
-// Ensure that the connection is closed when the Node.js process exits
-process.on('SIGINT', async () => {
-  console.log('Received SIGINT. Closing MongoDB connection...');
-  await client.close();
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM. Closing MongoDB connection...');
-  await client.close();
-  process.exit(0);
 });
