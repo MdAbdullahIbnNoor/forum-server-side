@@ -239,23 +239,11 @@ async function run() {
           return res.status(404).send({ message: 'User not found' });
       }
   
-      const isMember = user?.badge === 'Gold';
-      const postCount = user?.postCount || 0;
-
-      console.log(isMember, postCount);
-  
-      if (!isMember && postCount >= 5) {
-          return res.status(403).send({ message: 'User is not a member or has exceeded the post limit' });
-      }
-  
       const item = req.body;
   
       try {
           // Insert the new post
           const result = await postCollection.insertOne(item);
-  
-          // Log the current post count before updating
-          // console.log('Current post count:', postCount);
   
           // After successful post creation, increment postCount in userCollection
           const updateDoc = {
@@ -273,6 +261,7 @@ async function run() {
           res.status(500).send('Internal Server Error');
       }
   });
+  
   
 
     app.patch('/posts/:id', async (req, res) => {
