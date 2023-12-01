@@ -57,6 +57,7 @@ async function run() {
     const commentsCollection = client.db("forumData").collection("comments");
     const announcementsCollection = client.db("forumData").collection("announcements");
     const reportCollection = client.db("forumData").collection("reports");
+    const tagsCollection = client.db("forumData").collection("tags");
     const paymentCollection = client.db("forumData").collection("payments");
 
     // jwt related api
@@ -184,6 +185,22 @@ async function run() {
       res.send(result);
     });
 
+    app.post('/announcement', verifyToken, verifyAdmin, async (req, res) => {
+      const { authorName, title, description, authorImage } = req.body;
+
+      // Save the announcement data to MongoDB
+      const announcementData = {
+        authorImage: authorImage, // Ensure that this matches the field name in your client-side code
+        authorName: authorName,
+        title: title,
+        description: description,
+      };
+
+      const result = await announcementsCollection.insertOne(announcementData);
+
+      res.send(result);
+    });
+
     // posts related APIs
     app.get('/posts', async (req, res) => {
       let sortOption = req.query.sortOption || 'latest';
@@ -234,35 +251,35 @@ async function run() {
       const userEmail = req.decoded.email;
       const query = { email: userEmail };
       const user = await userCollection.findOne(query);
-  
+
       if (!user) {
-          return res.status(404).send({ message: 'User not found' });
+        return res.status(404).send({ message: 'User not found' });
       }
-  
+
       const item = req.body;
-  
+
       try {
-          // Insert the new post
-          const result = await postCollection.insertOne(item);
-  
-          // After successful post creation, increment postCount in userCollection
-          const updateDoc = {
-              $inc: { postCount: 1 },
-          };
-          await userCollection.updateOne(query, updateDoc);
-  
-          // Log the updated user information
-          const updatedUser = await userCollection.findOne(query);
-          // console.log('Updated user:', updatedUser);
-  
-          res.send(result);
+        // Insert the new post
+        const result = await postCollection.insertOne(item);
+
+        // After successful post creation, increment postCount in userCollection
+        const updateDoc = {
+          $inc: { postCount: 1 },
+        };
+        await userCollection.updateOne(query, updateDoc);
+
+        // Log the updated user information
+        const updatedUser = await userCollection.findOne(query);
+        // console.log('Updated user:', updatedUser);
+
+        res.send(result);
       } catch (error) {
-          console.error('Error adding post:', error);
-          res.status(500).send('Internal Server Error');
+        console.error('Error adding post:', error);
+        res.status(500).send('Internal Server Error');
       }
-  });
-  
-  
+    });
+
+
 
     app.patch('/posts/:id', async (req, res) => {
       const postId = req.params.id;
@@ -311,12 +328,12 @@ async function run() {
 
     app.get('/users/posts', verifyToken, async (req, res) => {
       const userEmail = req.decoded.email;
-    
+
       const posts = await postCollection
         .find({ 'author.email': userEmail })
         .sort({ time: -1 })
         .toArray();
-    
+
       res.send(posts);
     });
 
@@ -423,18 +440,119 @@ async function run() {
     // Endpoint to handle report submissions
     app.post('/reports', async (req, res) => {
       try {
-          const reportData = req.body;
+        const reportData = req.body;
 
-          // Insert the report data into the 'reportCollection'
-          const result = await reportCollection.insertOne(reportData);
+        // Insert the report data into the 'reportCollection'
+        const result = await reportCollection.insertOne(reportData);
 
-          // Send the result back to the client
-          res.json({ success: true, insertedId: result.insertedId });
+        // Send the result back to the client
+        res.json({ success: true, insertedId: result.insertedId });
       } catch (error) {
-          console.error('Error handling report:', error);
-          res.status(500).json({ success: false, error: 'Internal Server Error' });
+        console.error('Error handling report:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
       }
-  });
+    });
+
+    app.get('/reports', verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const reports = await reportCollection.find().toArray();
+        res.json(reports);
+      } catch (error) {
+        console.error('Error fetching reports:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    });
+
+    app.delete('/reports/deny/:id', verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const reportId = req.params.id;
+        const query = { _id: new ObjectId(reportId) };
+        const result = await reportCollection.deleteOne(query);
+        res.json(result);
+      } catch (error) {
+        console.error('Error denying report:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    });
+
+    app.delete('/reports/delete-comment/:id', verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const reportId = req.params.id;
+        const report = await reportCollection.findOne({ _id: new ObjectId(reportId) });
+
+        if (report && report.commentId) {
+          const commentId = report.commentId;
+          const commentQuery = { _id: new ObjectId(commentId) };
+          const commentResult = await commentsCollection.deleteOne(commentQuery);
+
+          if (commentResult.deletedCount > 0) {
+            // Delete the report after deleting the associated comment
+            const reportQuery = { _id: new ObjectId(reportId) };
+            const reportResult = await reportCollection.deleteOne(reportQuery);
+
+            res.json({ commentResult, reportResult });
+          } else {
+            res.status(404).json({ error: 'Comment not found' });
+          }
+        } else {
+          res.status(404).json({ error: 'Report or commentId not found in the report' });
+        }
+      } catch (error) {
+        console.error('Error deleting comment based on report:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    });
+
+    app.get('/admin/profile', verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const email = req.decoded.email;
+
+        const user = await userCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).send({ message: 'Admin not found' });
+        }
+
+        const postCount = await postCollection.countDocuments();
+        const commentCount = await commentsCollection.countDocuments();
+        const userCount = await userCollection.countDocuments();
+
+        const adminProfile = {
+          name: user.name,
+          image: user.image,
+          email: user.email,
+          postCount,
+          commentCount,
+          userCount,
+        };
+
+        res.send(adminProfile);
+      } catch (error) {
+        console.error('Error fetching admin profile:', error);
+        res.status(500).send('Internal Server Error');
+      }
+    });
+
+    app.post('/admin/tags', verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const { tag } = req.body;
+
+        // Check if tag already exists
+        const existingTag = await tagsCollection.findOne({ tag });
+
+        if (existingTag) {
+          return res.send({ message: 'Tag already exists', insertedId: null });
+        }
+
+        // Insert new tag
+        const result = await tagsCollection.insertOne({ tag });
+
+        res.send({ message: 'Tag added successfully', insertedId: result.insertedId });
+      } catch (error) {
+        console.error('Error adding tag:', error);
+        res.status(500).send('Internal Server Error');
+      }
+    });
 
 
     // Send a ping to confirm a successful connection
